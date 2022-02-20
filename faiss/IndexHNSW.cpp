@@ -120,7 +120,7 @@ void hnsw_add_vertices(
     size_t ntotal = n0 + n;
     double t0 = getmillisecs();
     if (verbose) {
-        printf("hnsw_add_vertices: adding %zd elements on top of %zd "
+        printf("hnsw_add_vertices(IndexHNSW): adding %zd elements on top of %zd "
                "(preset_levels=%d)\n",
                n,
                n0,

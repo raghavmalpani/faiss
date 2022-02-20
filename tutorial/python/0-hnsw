@@ -1,0 +1,19 @@
+import numpy as np
+import faiss
+import time
+
+dimen = 100
+maxM = 16
+trainSize = 1
+efCon = 40
+index = faiss.IndexHNSWFlat(dimen, maxM)
+index.verbose = True
+index.hnsw.efConstruction = efCon
+index.metric_type = faiss.METRIC_INNER_PRODUCT
+start = time.time()
+for i in range(trainSize):
+  vec = np.random.random((1, dimen)).astype('float32')
+  index.add(vec)
+
+end = time.time()
+print(end - start)
