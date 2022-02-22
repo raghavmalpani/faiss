@@ -665,6 +665,7 @@ HNSWStats HNSW::search(
         float d_nearest = qdis(nearest);
 
         for (int level = max_level; level >= 1; level--) {
+            printf("entering level %d\n", level);
             greedy_update_nearest(*this, qdis, level, nearest, d_nearest);
         }
 

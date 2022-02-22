@@ -15,6 +15,8 @@
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexIVFPQ.h>
 #include <faiss/index_io.h>
+#include <faiss/IndexHNSW.h>
+#include <faiss/MetricType.h>
 
 double elapsed() {
     struct timeval tv;
@@ -23,10 +25,38 @@ double elapsed() {
 }
 
 int main() {
+
+    // int d = 100;
+    // int maxM = 16;
+    // int train = 1;
+    // int nt = 1;
+    // faiss::IndexHNSWFlat index(d,maxM);
+    // index.verbose = true;
+    // index.hnsw.efConstruction = 40;
+    // index.metric_type = faiss::METRIC_INNER_PRODUCT;
+
+    // std::mt19937 rng;
+
+    // std::vector<float> trainvecs(nt * d);
+    // std::uniform_real_distribution<> distrib;
+    // for (size_t i = 0; i < nt * d; i++) {
+    //     trainvecs[i] = distrib(rng);
+    // }
+
+    // printf("hi");
+
+    // index.add(nt, trainvecs.data());
+
+    // index.search(nq, queries.data(), k, dis.data(), nns.data());
+
+
+
     double t0 = elapsed();
 
     // dimension of the vectors to index
     int d = 128;
+
+    int maxM = 16;
 
     // size of the database we plan to index
     size_t nb = 200 * 1000;
@@ -36,7 +66,7 @@ int main() {
     size_t nt = 100 * 1000;
 
     // make the index object and train it
-    faiss::IndexFlatL2 coarse_quantizer(d);
+    //faiss::IndexFlatL2 coarse_quantizer(d);
 
     // a reasonable number of centroids to index nb vectors
     int ncentroids = int(4 * sqrt(nb));
@@ -44,7 +74,7 @@ int main() {
     // the coarse quantizer should not be dealloced before the index
     // 4 = nb of bytes per code (d must be a multiple of this)
     // 8 = nb of bits per sub-code (almost always 8)
-    faiss::IndexIVFPQ index(&coarse_quantizer, d, ncentroids, 4, 8);
+    faiss::IndexHNSWFlat index(d, maxM);
 
     std::mt19937 rng;
 
@@ -93,9 +123,9 @@ int main() {
 
         index.add(nb, database.data());
 
-        printf("[%.3f s] imbalance factor: %g\n",
-               elapsed() - t0,
-               index.invlists->imbalance_factor());
+        // printf("[%.3f s] imbalance factor: %g\n",
+        //        elapsed() - t0,
+        //        index.invlists->imbalance_factor());
 
         // remember a few elements from the database as queries
         int i0 = 1234;
@@ -141,6 +171,7 @@ int main() {
         printf("note that the nearest neighbor is not at "
                "distance 0 due to quantization errors\n");
     }
+
 
     return 0;
 }
