@@ -120,7 +120,7 @@ struct IndexHNSW : Index {
             idx_t* labels,
             int nprobe = 1,
             int search_type = 1) const;
-
+   
     /// alternative graph building
     void init_level_0_from_knngraph(int k, const float* D, const idx_t* I);
 

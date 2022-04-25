@@ -10,7 +10,8 @@
 #include <faiss/impl/HNSW.h>
 
 #include <string>
-
+#include <list>
+#include <unordered_map>
 #include <faiss/impl/AuxIndexStructures.h>
 
 namespace faiss {
@@ -18,6 +19,103 @@ namespace faiss {
 /**************************************************************
  * HNSW structure implementation
  **************************************************************/
+
+HNSWStats2 stats2;
+
+void HNSWStats2::print_verbose(int index){
+    SearchStat temp = stats2.stat_list.at(index);
+    printf("Made a total of %zu candidate searches\n", temp.search_stat["nstep"]);
+    printf("Made a total of %zu distance queries during these searches\n", temp.search_stat["ndis"]);
+    printf("Out of the %zu queries: %zu caused a change in the result heap, %zu were already visited, and %zu were ignored\n", temp.search_stat["ndis"], temp.search_stat["nchanged"], temp.search_stat["nvisited"], temp.search_stat["nignored"]);
+}
+
+float HNSWStats2::get_average(std::string field, int level){
+    std::vector<SearchStat> stat_list = stats2.stat_list;
+    if (level != -1){
+        std::vector<SearchStat> stat_list_filtered;
+        for (int i = 0; i < stats2.stat_list.size(); i++){
+            if (stat_list.at(i).search_stat["level"] == level){
+                stat_list_filtered.push_back(stat_list.at(i));
+            }
+        }
+        stat_list = stat_list_filtered;
+    }
+    float sum = 0;
+    for (int i = 0; i < stat_list.size(); i++){
+        sum += (float) stat_list.at(i).search_stat[field];
+    }
+    return (sum/stat_list.size());
+}
+
+std::map<std::string, float> HNSWStats2::get_averages(int level){
+    std::vector<float> values(stats2.fields.size());
+
+    for (int i = 0; i < stats2.stat_list.size(); i++){
+        for (int j = 0; j < stats2.fields.size(); j++){
+            values.at(j) += (float) stats2.stat_list.at(i).search_stat[stats2.fields.at(j)];
+        }
+    }
+
+    std::map<std::string, float> averages;
+
+    for (int j = 0; j < stats2.fields.size(); j++){
+        averages[stats2.fields.at(j)] = values.at(j) / (float) stats2.stat_list.size();
+    }
+
+    return averages;
+}
+
+//returns max, index 
+std::tuple<int, int> HNSWStats2::get_max(std::string field){
+    int max = 0;
+    int index = -1;
+    for (int i = 0; i < stats2.stat_list.size(); i++){
+        int temp = stats2.stat_list.at(i).search_stat[field];
+        if (temp > max){
+            max = temp;
+            index = i;
+        }
+    }
+    return {max, index};
+}
+
+std::tuple<int, int> HNSWStats2::get_min(std::string field){
+    int min = INT_MAX;
+    int index = -1;
+    for (int i = 0; i < stats2.stat_list.size(); i++){
+        int temp = stats2.stat_list.at(i).search_stat[field];
+        if (temp < min){
+            min = temp;
+            index = i;
+        }
+    }
+    return {min, index};
+}
+
+std::map<std::string, std::tuple<int, int>> HNSWStats2::get_all_max(){
+    std::map<std::string, std::tuple<int, int>> all_max;
+
+    for (int j = 0; j < stats2.fields.size(); j++){
+        all_max[stats2.fields.at(j)] = stats2.get_max(stats2.fields.at(j));
+    }
+
+    return all_max;
+}
+
+std::map<std::string, std::tuple<int, int>> HNSWStats2::get_all_min(){
+    std::map<std::string, std::tuple<int, int>> all_min;
+
+    for (int j = 0; j < stats2.fields.size(); j++){
+        all_min[stats2.fields.at(j)] = stats2.get_max(stats2.fields.at(j));
+    }
+
+    return all_min;
+}
+
+
+HNSWStats2 HNSW::get_stats() {
+    return stats2;
+}
 
 int HNSW::nb_neighbors(int layer_no) const {
     return cum_nneighbor_per_level[layer_no + 1] -
@@ -96,6 +194,22 @@ void HNSW::reset() {
     offsets.push_back(0);
     levels.clear();
     neighbors.clear();
+}
+
+int HNSW::find_nearest_neighbor(int level, DistanceComputer& qdis) const {
+    printf("entering fnn\n");
+    int output = -1;
+    float curD = INT_MAX;
+    for (int i = 0; i < levels.size(); i++){
+        if (levels[i] > level){
+            float tempD = qdis(i);
+            if (tempD < curD){
+                output = i;
+                curD = tempD;
+            }
+        }
+    } 
+    return output;
 }
 
 void HNSW::print_neighbor_stats(int level) const {
@@ -328,7 +442,7 @@ void add_link(
 }
 
 /// search neighbors on a single level, starting from an entry point
-void search_neighbors_to_add(
+void search_neighbors_to_add(//ONLY ADDS NEIGHBORS IF THEY ARE STRICTLY SMALLER THAN 
         HNSW& hnsw,
         DistanceComputer& qdis,
         std::priority_queue<NodeDistCloser>& results,
@@ -380,9 +494,60 @@ void search_neighbors_to_add(
     vt.advance();
 }
 
+
+
 /**************************************************************
  * Searching subroutines
  **************************************************************/
+
+int bfs(
+    const HNSW& hnsw,
+    DistanceComputer& qdis,
+    int level,
+    int sp,
+    int ep
+    ){
+        std::unordered_set<int> visited;
+        std::unordered_map<int, int> dist;
+        std::unordered_map<int, int> pred;
+    
+        // Create a queue for BFS
+        std::list<int> queue;
+    
+        // Mark the current node as visited and enqueue it
+        dist[sp] = 0;
+        visited.insert(sp);
+        queue.push_back(sp);
+
+        if (sp == ep){
+            return 0;
+        }
+
+        while(!queue.empty())
+        {
+            // Dequeue a vertex from queue and print it
+            sp = queue.front();
+            queue.pop_front();
+    
+            // Get all adjacent vertices of the dequeued
+            // vertex s. If a adjacent has not been visited,
+            // then mark it visited and enqueue it
+            size_t begin, end;
+            hnsw.neighbor_range(sp, level, &begin, &end);
+            for (size_t i = begin; i < end; i++) {
+                int v = hnsw.neighbors[i];
+                if (v != -1 && visited.find(v) == visited.end()){
+                    visited.insert(v);
+                    dist[v] = dist.find(sp)->second + 1;
+                    pred[v] = sp;
+                    if (v == ep){
+                        return dist.find(sp)->second + 1;
+                    }
+                }
+            }
+        }
+        return -1;
+    }
 
 /// greedily update a nearest vector at a given level
 void greedy_update_nearest(
@@ -390,33 +555,76 @@ void greedy_update_nearest(
         DistanceComputer& qdis,
         int level,
         storage_idx_t& nearest,
-        float& d_nearest) {
+        float& d_nearest,
+        bool fromSearch = false
+        ) {
+
+    SearchStat search_info;
+    
+    int nstep = 0;
+    int nvisited = 0;
+    int nignored = 0;
+    int nchanged = 0;
+    int ndis = 0;
+
+
     for (;;) {
+        nstep++;
         storage_idx_t prev_nearest = nearest;
 
         size_t begin, end;
         hnsw.neighbor_range(nearest, level, &begin, &end);
         for (size_t i = begin; i < end; i++) {
+            ndis++;
             storage_idx_t v = hnsw.neighbors[i];
             if (v < 0)
                 break;
             float dis = qdis(v);
             if (dis < d_nearest) {
+                nchanged++;
                 nearest = v;
                 d_nearest = dis;
             }
+            else{
+                nignored++;
+            }
         }
-        if (nearest == prev_nearest) {
+        if (nearest == prev_nearest && fromSearch) {
+            search_info.search_stat["nchanged"] = nchanged;
+            search_info.search_stat["nvisited"] = nvisited;
+            search_info.search_stat["nignored"] = nignored;
+            search_info.search_stat["nstep"] = nstep;
+            search_info.search_stat["ndis"] = ndis;
+            search_info.search_stat["level"] = level;
+
+            stats2.stat_list.push_back(search_info);
+
+            int closest = hnsw.find_nearest_neighbor(level, qdis);
+
+            UpperLevelSearchStat upStat;
+            upStat.dist_global_minima = qdis(closest);
+            upStat.dist_found_minima = qdis(nearest);
+            upStat.global_minima = closest;
+            upStat.found_minima = nearest;
+            upStat.edge_hops_away = bfs(hnsw, qdis, level, nearest, closest);
+            upStat.level = level;
+
+            stats2.upper_level_stats.push_back(upStat);
+
+            return;
+        }
+        else if(nearest == prev_nearest){
             return;
         }
     }
 }
 
+
 } // namespace
 
 /// Finds neighbors and builds links with them, starting from an entry
 /// point. The own neighbor list is assumed to be locked.
-void HNSW::add_links_starting_from(
+void HNSW::add_links_starting_from(//I could be wrong, but I believe this method adds all the possible neighbors and then shrinks it to a size smaller/equal to M
         DistanceComputer& ptdis,
         storage_idx_t pt_id,
         storage_idx_t nearest,
@@ -513,12 +721,18 @@ int HNSW::search_from_candidates(
         HNSWStats& stats,
         int level,
         int nres_in) const {
+
+    SearchStat search_info;
+
     int nres = nres_in;
     int ndis = 0;
     for (int i = 0; i < candidates.size(); i++) {
         idx_t v1 = candidates.ids[i];
         float d = candidates.dis[i];
         FAISS_ASSERT(v1 >= 0);
+
+        //printf("adding from candidates: %ld\n", (long int) v1);
+
         if (nres < k) {
             faiss::maxheap_push(++nres, D, I, d, v1);
         } else if (d < D[0]) {
@@ -529,10 +743,15 @@ int HNSW::search_from_candidates(
 
     bool do_dis_check = check_relative_distance;
     int nstep = 0;
+    int nvisited = 0;
+    int nignored = 0;
+    int nchanged = 0;
 
     while (candidates.size() > 0) {
+        //printf("at step %i\n", nstep);
         float d0 = 0;
         int v0 = candidates.pop_min(&d0);
+        //printf("checking candidate %i\n", v0);
 
         if (do_dis_check) {
             // tricky stopping condition: there are more that ef
@@ -547,12 +766,15 @@ int HNSW::search_from_candidates(
 
         size_t begin, end;
         neighbor_range(v0, level, &begin, &end);
+        
 
         for (size_t j = begin; j < end; j++) {
             int v1 = neighbors[j];
+            //printf("checking neighbor %i at step %i\n", v1, nstep);
             if (v1 < 0)
                 break;
             if (vt.get(v1)) {
+                nvisited ++;
                 continue;
             }
             vt.set(v1);
@@ -560,8 +782,14 @@ int HNSW::search_from_candidates(
             float d = qdis(v1);
             if (nres < k) {
                 faiss::maxheap_push(++nres, D, I, d, v1);
+                nchanged++;
+                //printf("%i was placed in the heap as nres < k!\n", v1);
             } else if (d < D[0]) {
+                //printf("%i was placed in the heap as d < D[0]!\n", v1);
                 faiss::maxheap_replace_top(nres, D, I, d, v1);
+                nchanged++;
+            } else {
+                nignored++;
             }
             candidates.push(v1, d);
         }
@@ -572,6 +800,19 @@ int HNSW::search_from_candidates(
         }
     }
 
+    // printf("Made a total of %i candidate searches\n", nstep);
+    // printf("Made a total of %i distance queries during these searches\n", ndis);
+    // printf("Out of the %i queries: %i caused a change in the result heap, %i were already visited, and %i were ignored\n", ndis, nchanged, nvisited, nignored);
+
+    search_info.search_stat["nchanged"] = nchanged;
+    search_info.search_stat["nvisited"] = nvisited;
+    search_info.search_stat["nignored"] = nignored;
+    search_info.search_stat["nstep"] = nstep;
+    search_info.search_stat["ndis"] = ndis;
+    search_info.search_stat["level"] = level;
+
+    stats2.stat_list.push_back(search_info);
+
     if (level == 0) {
         stats.n1++;
         if (candidates.size() == 0) {
@@ -580,6 +821,7 @@ int HNSW::search_from_candidates(
         stats.n3 += ndis;
     }
 
+    
     return nres;
 }
 
@@ -659,6 +901,8 @@ HNSWStats HNSW::search(
         VisitedTable& vt) const {
     HNSWStats stats;
 
+    
+
     if (upper_beam == 1) {
         //  greedy search on upper levels
         storage_idx_t nearest = entry_point;
@@ -666,7 +910,7 @@ HNSWStats HNSW::search(
 
         for (int level = max_level; level >= 1; level--) {
             printf("entering level %d\n", level);
-            greedy_update_nearest(*this, qdis, level, nearest, d_nearest);
+            greedy_update_nearest(*this, qdis, level, nearest, d_nearest, true);
         }
 
         int ef = std::max(efSearch, k);
@@ -674,6 +918,8 @@ HNSWStats HNSW::search(
             MinimaxHeap candidates(ef);
 
             candidates.push(nearest, d_nearest);
+
+
 
             search_from_candidates(qdis, k, I, D, candidates, vt, stats, 0);
         } else {

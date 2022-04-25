@@ -12,6 +12,9 @@
 #include <queue>
 #include <unordered_set>
 #include <vector>
+#include <map>
+#include <tuple>
+#include <unordered_map>
 
 #include <omp.h>
 
@@ -42,8 +45,73 @@ namespace faiss {
 struct VisitedTable;
 struct DistanceComputer; // from AuxIndexStructures
 struct HNSWStats;
+struct HNSWStats2;
+struct SearchStat;
+struct UpperLevelSearchStat;
+
+struct UpperLevelSearchStat{
+    int query;
+    int global_minima;
+    int found_minima;
+    int edge_hops_away;
+    float dist_global_minima;
+    float dist_found_minima;
+    int level;
+};
+
+struct SearchStat {
+     std::map<std::string, size_t> search_stat;
+};
+
+struct HNSWStats2 {
+    std::vector<UpperLevelSearchStat> upper_level_stats;
+    std::vector<SearchStat> stat_list;
+    std::vector<std::string> fields{"nstep", "ndis", "nchanged", "nvisited", "nignored"};
+
+    HNSWStats2(
+            std::vector<SearchStat> stat_list = std::vector<SearchStat>(),
+            std::vector<UpperLevelSearchStat> upper_level_stats = std::vector<UpperLevelSearchStat>() 
+        ): stat_list(stat_list), upper_level_stats(upper_level_stats) {}
+
+    void print_verbose(int index);
+    float get_average(std::string field, int level = -1);
+    std::map<std::string, float> get_averages(int level = -1);
+    std::tuple<int, int> get_max(std::string field);
+    std::tuple<int, int> get_min(std::string field);
+    std::map<std::string, std::tuple<int, int>> get_all_max();
+    std::map<std::string, std::tuple<int, int>> get_all_min();
+};
+
+struct HNSWStats {
+    size_t n1, n2, n3;
+    size_t ndis;
+    size_t nreorder;
+
+    HNSWStats(
+            size_t n1 = 0,
+            size_t n2 = 0,
+            size_t n3 = 0,
+            size_t ndis = 0,
+            size_t nreorder = 0)
+            : n1(n1), n2(n2), n3(n3), ndis(ndis), nreorder(nreorder) {}
+
+    void reset() {
+        n1 = n2 = n3 = 0;
+        ndis = 0;
+        nreorder = 0;
+    }
+
+    void combine(const HNSWStats& other) {
+        n1 += other.n1;
+        n2 += other.n2;
+        n3 += other.n3;
+        ndis += other.ndis;
+        nreorder += other.nreorder;
+    }
+};
 
 struct HNSW {
+
     /// internal storage of vectors (32 bits: this is expensive)
     typedef int storage_idx_t;
 
@@ -167,6 +235,8 @@ struct HNSW {
     /// pick a random level for a new point
     int random_level();
 
+    HNSWStats2 get_stats();
+
     /// add n random levels to table (for debugging...)
     void fill_with_random_links(size_t n);
 
@@ -214,10 +284,14 @@ struct HNSW {
             float* D,
             VisitedTable& vt) const;
 
+    
+    
     void reset();
 
     void clear_neighbor_tables(int level);
     void print_neighbor_stats(int level) const;
+    
+    int find_nearest_neighbor(int level, DistanceComputer& qdis) const;
 
     int prepare_level_tab(size_t n, bool preset_levels = false);
 
@@ -228,33 +302,6 @@ struct HNSW {
             int max_size);
 };
 
-struct HNSWStats {
-    size_t n1, n2, n3;
-    size_t ndis;
-    size_t nreorder;
-
-    HNSWStats(
-            size_t n1 = 0,
-            size_t n2 = 0,
-            size_t n3 = 0,
-            size_t ndis = 0,
-            size_t nreorder = 0)
-            : n1(n1), n2(n2), n3(n3), ndis(ndis), nreorder(nreorder) {}
-
-    void reset() {
-        n1 = n2 = n3 = 0;
-        ndis = 0;
-        nreorder = 0;
-    }
-
-    void combine(const HNSWStats& other) {
-        n1 += other.n1;
-        n2 += other.n2;
-        n3 += other.n3;
-        ndis += other.ndis;
-        nreorder += other.nreorder;
-    }
-};
 
 // global var that collects them all
 FAISS_API extern HNSWStats hnsw_stats;

@@ -15,7 +15,8 @@ namespace faiss {
  * Random data generation functions
  **************************************************/
 
-RandomGenerator::RandomGenerator(int64_t seed) : mt((unsigned int)seed) {}
+//RandomGenerator::RandomGenerator(int64_t seed) : mt((unsigned int)seed) {}
+RandomGenerator::RandomGenerator(int64_t seed) : mt((unsigned int) rand()) {}
 
 int RandomGenerator::rand_int() {
     return mt() & 0x7fffffff;

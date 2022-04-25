@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <list>
 
 #include <queue>
 #include <unordered_set>
@@ -131,6 +132,7 @@ void hnsw_add_vertices(
         return;
     }
 
+    //hnsw.prepare_level_tab sets a level to each element in the hnsw graph.
     int max_level = hnsw.prepare_level_tab(n, preset_levels);
 
     if (verbose) {
@@ -147,7 +149,7 @@ void hnsw_add_vertices(
 
     { // make buckets with vectors of the same level
 
-        // build histogram
+        // builds a histogram with hist[i] holding the number of elements that are placed at level i
         for (int i = 0; i < n; i++) {
             storage_idx_t pt_id = i + n0;
             int pt_level = hnsw.levels[pt_id] - 1;
@@ -159,7 +161,7 @@ void hnsw_add_vertices(
         // accumulate
         std::vector<int> offsets(hist.size() + 1, 0);
         for (int i = 0; i < hist.size() - 1; i++) {
-            offsets[i + 1] = offsets[i] + hist[i];
+            offsets[i + 1] = offsets[i] + hist[i]; //I believe this is the offset per level.
         }
 
         // bucket sort
@@ -287,6 +289,9 @@ void IndexHNSW::search(
         idx_t* labels) const
 
 {
+
+    printf("entering search\n");
+
     FAISS_THROW_IF_NOT(k > 0);
 
     FAISS_THROW_IF_NOT_MSG(
@@ -347,7 +352,7 @@ void IndexHNSW::search(
             distances[i] = -distances[i];
         }
     }
-
+    
     hnsw_stats.combine({n1, n2, n3, ndis, nreorder});
 }
 
@@ -421,6 +426,8 @@ void IndexHNSW::search_level_0(
         int search_type) const {
     FAISS_THROW_IF_NOT(k > 0);
     FAISS_THROW_IF_NOT(nprobe > 0);
+
+    printf("SEARCHING LEVEL 0\n");
 
     storage_idx_t ntotal = hnsw.levels.size();
     size_t n1 = 0, n2 = 0, n3 = 0, ndis = 0, nreorder = 0;
